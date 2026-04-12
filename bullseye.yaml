@@ -1,0 +1,19 @@
+last_evaluated: d2c87c5
+targets:
+  T1:
+    name: mcpsafe proxies FogBugz API requests with Keychain-sourced credentials
+    status: converging
+    value: 13.0
+    cost: 5.0
+    acceptance:
+    - '`go build ./...` produces a working binary'
+    - Binary listens on a localhost port, accepts HTTP requests
+    - Reads a named credential from macOS Keychain via `security find-generic-password`
+    - Caches credential in memory after first read
+    - Rewrites request host to configured backend URL
+    - Appends `&token=<credential>` to query params
+    - Forwards request to real backend and returns response
+    - Starlark config script defines the transform (host rewrite + credential injection)
+    context: MCP servers like fogbugz-mcp need API tokens. Passing tokens via env vars or config files leaves secrets on disk. mcpsafe keeps credentials in macOS Keychain only.
+    origin: manual
+    discovered: 2026-03-06
