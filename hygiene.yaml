@@ -1,0 +1,358 @@
+# hygiene.yaml — declared, drift-validated hygiene posture for mcpsafe.
+# Schema: ~/.claude/skills/hygiene/SKILL.md. Validate with `/hygiene`.
+# Declares current reality only. Gaps are planned/skipped above the floor.
+
+schema_version: 1
+
+repo: mcpsafe
+aspires: 3
+floors:            # per-dimension held-tier ratchet; below floor => DRIFT
+  correctness: 1   # transform tests run locally; no CI, proxy/keychain untested
+  security: 2      # go.sum + GitHub secret scanning + push protection
+  quality: 2       # gofmt and go vet clean locally; no lint CI
+  deps: 1          # go.sum committed; go mod tidy -diff is dirty
+  release: 0       # no tags, changelog, or release workflow
+  governance: 0    # LICENSE + .gitignore; no README (baseline incomplete)
+  build: 1         # GOWORK=off go build ./... locally; no CI
+  docs: 0          # no README
+  perf: 0          # no benchmarks
+  vcs: 0           # no committed git hooks
+  agent: 1         # CLAUDE.md + bullseye.yaml; no AGENTS.md
+
+tiers:
+  1: baseline    # LICENSE + README + .gitignore; tests build & run
+  2: maintained  # full matrix, examples run, lint/format, release + governance
+  3: hardened    # formal specs, security scanning, SBOM/signing, fuzzing, perf
+
+items:
+
+  # ============================== CORRECTNESS =============================
+  - id: correctness.tests
+    dim: correctness
+    desc: go test ./... passes locally (transform package; GOWORK=off)
+    state: present
+    cadence: continuous
+    enforce: warning
+    tier: 1
+    evidence: {command: GOWORK=off go test ./...}
+
+  - id: correctness.ci
+    dim: correctness
+    desc: Tests run on every push/PR in GitHub Actions
+    state: planned
+    cadence: continuous
+    enforce: blocking
+    tier: 2
+    reason: No .github/workflows; tests are local-only.
+    evidence: {absent: {file: {path: .github/workflows/ci.yml}}}
+
+  - id: correctness.proxy-tests
+    dim: correctness
+    desc: ServeHTTP / Keychain paths have package tests
+    state: planned
+    cadence: continuous
+    enforce: warning
+    tier: 2
+    reason: Only transform/transform_test.go exists; main and keychain have no test files.
+    evidence: {absent: {file: {path: main_test.go}}}
+
+  # =========================== SECURITY / SUPPLY ==========================
+  - id: security.mod-sum
+    dim: security
+    desc: go.sum committed — pinned module graph
+    state: present
+    cadence: per-release
+    enforce: warning
+    tier: 1
+    evidence: {file: {path: go.sum}}
+
+  - id: security.secret-scan
+    dim: security
+    desc: GitHub secret scanning enabled
+    state: enforced
+    cadence: continuous
+    enforce: blocking
+    tier: 2
+    evidence:
+      {gh_setting: {key: security_and_analysis.secret_scanning.status, equals: enabled}}
+
+  - id: security.push-protection
+    dim: security
+    desc: GitHub secret-scanning push protection enabled
+    state: enforced
+    cadence: continuous
+    enforce: blocking
+    tier: 2
+    evidence:
+      {gh_setting: {key: security_and_analysis.secret_scanning_push_protection.status, equals: enabled}}
+
+  - id: security.gitleaks
+    dim: security
+    desc: Secret scanning (gitleaks) in pre-commit and/or CI
+    state: planned
+    cadence: continuous
+    enforce: warning
+    tier: 3
+    reason: Relies on GitHub secret scanning; no gitleaks config or CI invocation.
+    evidence: {absent: {scanner: {tool: gitleaks}}}
+
+  - id: security.govulncheck
+    dim: security
+    desc: govulncheck over the module graph in CI
+    state: planned
+    cadence: periodic:30d
+    enforce: warning
+    tier: 3
+    reason: No vuln scanner invoked; golang.org/x/sys is a 2022 pseudo-version.
+    evidence: {absent: {scanner: {tool: govulncheck}}}
+
+  - id: security.dependabot
+    dim: security
+    desc: Dependabot security updates enabled
+    state: planned
+    cadence: continuous
+    enforce: warning
+    tier: 3
+    reason: dependabot_security_updates is disabled on the GitHub repo.
+    evidence:
+      {absent: {gh_setting: {key: security_and_analysis.dependabot_security_updates.status, equals: enabled}}}
+
+  - id: security.sast
+    dim: security
+    desc: CodeQL / SAST in CI
+    state: planned
+    cadence: continuous
+    enforce: informational
+    tier: 3
+    reason: No workflows and no code-scanning analysis on the repo.
+    evidence: {absent: {ci_job: ci.yml#codeql}}
+
+  # ============================== CODE QUALITY ============================
+  - id: quality.format
+    dim: quality
+    desc: Sources are gofmt-clean
+    state: present
+    cadence: continuous
+    enforce: warning
+    tier: 2
+    evidence: {command: 'test -z "$(gofmt -l .)"'}
+
+  - id: quality.vet
+    dim: quality
+    desc: go vet ./... is clean (GOWORK=off)
+    state: present
+    cadence: continuous
+    enforce: warning
+    tier: 2
+    evidence: {command: GOWORK=off go vet ./...}
+
+  - id: quality.lint
+    dim: quality
+    desc: golangci-lint (or equivalent) is clean and gated
+    state: planned
+    cadence: continuous
+    enforce: warning
+    tier: 3
+    reason: No lint config or CI job; local golangci-lint reports errcheck/SA1019 and is not a gate.
+    evidence: {absent: {file: {path: .golangci.yml}}}
+
+  # =========================== DEPENDENCY HEALTH ==========================
+  - id: deps.go-sum
+    dim: deps
+    desc: go.sum is committed
+    state: present
+    cadence: once-must-hold
+    enforce: warning
+    tier: 1
+    evidence: {file: {path: go.sum}}
+
+  - id: deps.tidy
+    dim: deps
+    desc: go mod tidy -diff is clean
+    state: planned
+    cadence: continuous
+    enforce: warning
+    tier: 2
+    reason: tidy -diff currently fails (would promote go.starlark.net to direct and add sum entries).
+    evidence: {absent: {command: GOWORK=off go mod tidy -diff}}
+
+  # ========================== RELEASE & VERSIONING =======================
+  - id: release.workflow
+    dim: release
+    desc: Release artifacts are built by CI from git tags
+    state: planned
+    cadence: per-release
+    enforce: warning
+    tier: 2
+    reason: No tags, no releases, version is hardcoded "dev"; no release workflow.
+    evidence: {absent: {file: {path: .github/workflows/release.yml}}}
+
+  - id: release.changelog
+    dim: release
+    desc: A maintained CHANGELOG records user-visible changes per release
+    state: planned
+    cadence: per-release
+    enforce: informational
+    tier: 3
+    reason: History lives in git; no CHANGELOG.md.
+    evidence: {absent: {file: {path: CHANGELOG.md}}}
+
+  # ============================ GOVERNANCE / META ========================
+  - id: governance.license
+    dim: governance
+    desc: Apache-2.0 LICENSE present
+    state: present
+    cadence: once-must-hold
+    enforce: blocking
+    tier: 1
+    evidence: {file: {path: LICENSE, matches: 'Apache License'}}
+
+  - id: governance.gitignore
+    dim: governance
+    desc: .gitignore covers the local binary and OS junk
+    state: present
+    cadence: once-must-hold
+    enforce: warning
+    tier: 1
+    evidence: {file: {path: .gitignore}}
+
+  - id: governance.readme
+    dim: governance
+    desc: README present and current
+    state: planned
+    cadence: once-must-hold
+    enforce: blocking
+    tier: 1
+    reason: No README.md; CLAUDE.md is agent-facing only.
+    evidence: {absent: {file: {path: README.md}}}
+
+  - id: governance.squash-only
+    dim: governance
+    desc: Repo is squash-merge only (merge commits disabled)
+    state: enforced
+    cadence: once-must-hold
+    enforce: blocking
+    tier: 2
+    evidence: {gh_setting: {key: allow_merge_commit, equals: false}}
+
+  - id: governance.delete-branch
+    dim: governance
+    desc: Delete-branch-on-merge is enabled
+    state: enforced
+    cadence: once-must-hold
+    enforce: warning
+    tier: 2
+    evidence: {gh_setting: {key: delete_branch_on_merge, equals: true}}
+
+  - id: governance.security-md
+    dim: governance
+    desc: SECURITY.md documents the vulnerability-disclosure process
+    state: planned
+    cadence: once-must-hold
+    enforce: informational
+    tier: 3
+    reason: Public repo without a published disclosure policy.
+    evidence: {absent: {file: {path: SECURITY.md}}}
+
+  # ================================= BUILD ===============================
+  - id: build.go
+    dim: build
+    desc: GOWORK=off go build ./... succeeds (parent go.work does not list this module)
+    state: present
+    cadence: continuous
+    enforce: warning
+    tier: 1
+    evidence: {command: GOWORK=off go build ./...}
+
+  - id: build.ci
+    dim: build
+    desc: CI builds the module on push/PR
+    state: planned
+    cadence: continuous
+    enforce: blocking
+    tier: 2
+    reason: No GitHub Actions workflows.
+    evidence: {absent: {file: {path: .github/workflows/ci.yml}}}
+
+  - id: build.non-darwin
+    dim: build
+    desc: Linux/Windows CI build of the Keychain path
+    state: skipped
+    cadence: continuous
+    enforce: informational
+    tier: 3
+    reason: >-
+      Darwin-only Keychain via Security.framework/cgo (keychain_darwin.go);
+      GOOS=linux fails with undefined readKeychain. No !darwin stub.
+    evidence: {absent: {file: {path: keychain/keychain_linux.go}}}
+
+  # ============================ DOCUMENTATION ============================
+  - id: docs.readme
+    dim: docs
+    desc: README documents build, run, and Keychain setup
+    state: planned
+    cadence: once-must-hold
+    enforce: warning
+    tier: 1
+    reason: No README.md.
+    evidence: {absent: {file: {path: README.md}}}
+
+  - id: docs.bullseye
+    dim: docs
+    desc: bullseye.yaml is the intent ledger for followable work
+    state: present
+    cadence: once-must-hold
+    enforce: informational
+    tier: 1
+    evidence: {file: {path: bullseye.yaml}}
+
+  # ============================== PERFORMANCE ===========================
+  - id: perf.benchmarks
+    dim: perf
+    desc: Benchmark suite exists and runs in CI
+    state: planned
+    cadence: per-release
+    enforce: informational
+    tier: 3
+    reason: No benchmarks; transform tests are functional only.
+    evidence: {absent: {ci_job: ci.yml#bench}}
+
+  # ============================== VCS / HISTORY =========================
+  - id: vcs.hooks
+    dim: vcs
+    desc: scripts/hooks/pre-commit activated (core.hooksPath) for local gating
+    state: planned
+    cadence: once-must-hold
+    enforce: warning
+    tier: 2
+    reason: No scripts/hooks/; scripts/ only contains fogbugz-mcp.sh.
+    evidence: {absent: {file: {path: scripts/hooks/pre-commit}}}
+
+  # =================== AGENT-READINESS / ONBOARDING ====================
+  - id: agent.claude-md
+    dim: agent
+    desc: CLAUDE.md present (project conventions discoverable by agents)
+    state: present
+    cadence: once-must-hold
+    enforce: warning
+    tier: 1
+    evidence: {file: {path: CLAUDE.md}}
+
+  - id: agent.bullseye
+    dim: agent
+    desc: bullseye.yaml present (convergence targets discoverable)
+    state: present
+    cadence: once-must-hold
+    enforce: informational
+    tier: 1
+    evidence: {file: {path: bullseye.yaml}}
+
+  - id: agent.agents-md
+    dim: agent
+    desc: AGENTS.md present as the shared multi-tool instruction file
+    state: planned
+    cadence: once-must-hold
+    enforce: informational
+    tier: 2
+    reason: Only CLAUDE.md exists; no AGENTS.md.
+    evidence: {absent: {file: {path: AGENTS.md}}}
